@@ -1,0 +1,114 @@
+﻿<Window x:Class="TwinCamCaptureFor3D.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Dual WebCam Recorder (.NET 10)" Height="750" Width="1250"
+        Closing="Window_Closing"
+        SizeChanged="Window_SizeChanged">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 共通：保存先フォルダ指定 ＆ デバイス・解像度スキャンコントロール -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="共通保存先: " VerticalAlignment="Center" Width="80" FontWeight="Bold"/>
+            <TextBox x:Name="SavePathTextBox" Width="300" VerticalAlignment="Center" Margin="0,0,5,0" Height="24"/>
+            <Button Content="参照..." Width="60" Padding="5,2" Margin="0,0,15,0" Click="BrowseFolder_Click"/>
+            
+            <Button Content="全デバイス更新" Width="100" Margin="0,0,10,0" Padding="5,2" Click="RefreshCameras_Click"/>
+            <Button Content="解像度を取得" Width="100" Padding="5,2" Click="FetchResolutions_Click" FontWeight="Bold" Foreground="DarkGreen"/>
+            <Button Content="バージョン情報" Click="AboutButton_Click" Width="90" Height="25" Margin="5" />
+        </StackPanel>
+
+        <!-- 左右分割パネル (Grid.Row="1") -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ==================== [左側カメラセクション] ==================== -->
+            <Border Grid.Column="0" BorderBrush="LightGray" BorderThickness="1" Padding="10" CornerRadius="4">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="【 左カメラ 】" FontWeight="Bold" Margin="0,0,0,5" Foreground="DarkBlue"/>
+                    
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Text="カメラ:" Width="55" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="LeftCameraComboBox" Width="220" SelectionChanged="LeftCameraComboBox_SelectionChanged"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Text="解像度 / FPS:" Width="75" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="LeftResolutionComboBox" Width="100" Margin="0,0,5,0"/>
+                        <ComboBox x:Name="LeftFpsComboBox" Width="95"/>
+                    </StackPanel>
+
+                    <!-- プレビュー＆格子線 -->
+                    <Grid Grid.Row="3" Margin="0,5,0,0">
+                        <Image x:Name="LeftCamImage" Stretch="Uniform"/>
+                        <Canvas x:Name="LeftGridOverlayCanvas" IsHitTestVisible="False"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- ==================== [右側カメラセクション] ==================== -->
+            <Border Grid.Column="2" BorderBrush="LightGray" BorderThickness="1" Padding="10" CornerRadius="4">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="【 右カメラ 】" FontWeight="Bold" Margin="0,0,0,5" Foreground="DarkRed"/>
+                    
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Text="カメラ:" Width="55" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="RightCameraComboBox" Width="220" SelectionChanged="RightCameraComboBox_SelectionChanged"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Text="解像度 / FPS:" Width="75" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="RightResolutionComboBox" Width="100" Margin="0,0,5,0"/>
+                        <ComboBox x:Name="RightFpsComboBox" Width="95"/>
+                    </StackPanel>
+
+                    <!-- プレビュー＆格子線 -->
+                    <Grid Grid.Row="3" Margin="0,5,0,0">
+                        <Image x:Name="RightCamImage" Stretch="Uniform"/>
+                        <Canvas x:Name="RightGridOverlayCanvas" IsHitTestVisible="False"/>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- プレビュー制御ボタン -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10">
+            <Button x:Name="StartButton" Content="両方プレビュー開始" Width="140" Margin="5" Padding="5" Click="StartButton_Click"/>
+            <Button x:Name="StopButton" Content="両方プレビュー停止" Width="140" Margin="5" Padding="5" Click="StopButton_Click" IsEnabled="False"/>
+        </StackPanel>
+
+        <!-- 録画・画像保存コントロールボタン -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5">
+            <Button x:Name="RecordButton" Content="両方同時に録画開始" Width="150" Margin="5" Padding="5,10" Click="RecordButton_Click" IsEnabled="False"/>
+            <Button x:Name="CaptureButton" Content="両方同時に画像保存" Width="150" Margin="5" Padding="5,10" Click="CaptureButton_Click" IsEnabled="False"/>
+        </StackPanel>
+
+        <!-- ステータス表示エリア -->
+        <TextBlock x:Name="StreamInfoText" Grid.Row="4" Text="ステータス: 停止中" 
+                   HorizontalAlignment="Center" Margin="0,5,0,0" Foreground="Gray"/>
+    </Grid>
+</Window>

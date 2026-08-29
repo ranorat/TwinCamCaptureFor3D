@@ -206,3 +206,24 @@ This project uses [OpenCvSharp](https://github.com/shimat/opencvsharp) which is 
    See the License for the specific language governing permissions and
    limitations under the License.
 
+
+## License
+This software is licensed under the [Apache License 2.0](LICENSE). 
+
+This project uses [OpenCV](https://github.com) and [OpenCvSharp](https://github.com), which are licensed under the Apache License 2.0.
+
+-------------------------------------------------------------------
+This product includes software developed by OpenCV (https://opencv.org).
+Licensed under the Apache License 2.0.
+-------------------------------------------------------------------
+Copyright (C) 2000-2026, Intel Corporation, all rights reserved.
+Copyright (C) 2009-2011, Willow Garage Inc., all rights reserved.
+Copyright (C) 2011-2016, NVIDIA Corporation, all rights reserved.
+Copyright (C) 2010-2013, Advanced Micro Devices, Inc., all rights reserved.
+Copyright (C) 2015-2026, OpenCV Foundation, all rights reserved.
+Copyright (C) 2015-2026, Itseez Inc., all rights reserved.
+Copyright (C) 2019-2026, Xperience AI, all rights reserved.
+
+
+
+

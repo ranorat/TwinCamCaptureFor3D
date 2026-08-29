@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using OpenCvSharp;
 using OpenCvSharp.WpfExtensions;
+using System.Windows.Media.Imaging; // ← これを追加
 
 namespace TwinCamCaptureFor3D
 {
@@ -362,15 +363,26 @@ namespace TwinCamCaptureFor3D
 
                         if (readSuccess && !frame.Empty())
                         {
-                            Dispatcher.Invoke(() =>
+                            // Bitmapの変換とFreeze処理
+                            System.Windows.Media.Imaging.WriteableBitmap? bmp = null;
+                            try
                             {
-                                if (!token.IsCancellationRequested)
+                                bmp = WriteableBitmapConverter.ToWriteableBitmap(frame);
+                                bmp.Freeze(); // フリーズしてスレッド間の描画を軽量化
+                            }
+                            catch { }
+
+                            if (bmp != null)
+                            {
+                                Dispatcher.InvokeAsync(() =>
                                 {
-                                    var bmp = WriteableBitmapConverter.ToWriteableBitmap(frame);
-                                    if (isLeft) LeftCamImage.Source = bmp;
-                                    else RightCamImage.Source = bmp;
-                                }
-                            });
+                                    if (!token.IsCancellationRequested)
+                                    {
+                                        if (isLeft) LeftCamImage.Source = bmp;
+                                        else RightCamImage.Source = bmp;
+                                    }
+                                }, System.Windows.Threading.DispatcherPriority.Render);
+                            }
 
                             lock (_lockObject)
                             {
@@ -387,11 +399,15 @@ namespace TwinCamCaptureFor3D
                                 }
                             }
                         }
+
+
+
                         else
                         {
                             Thread.Sleep(10);
                         }
 
+                        // 録画処理部分はそのままでOK
                         lock (_lockObject)
                         {
                             var writer = isLeft ? _leftWriter : _rightWriter;
@@ -421,6 +437,7 @@ namespace TwinCamCaptureFor3D
                             }
                         }
                     }
+
                 }
                 catch (Exception ex)
                 {

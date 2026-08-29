@@ -37,7 +37,7 @@ namespace TwinCamCaptureFor3D
         public MainWindow()
         {
             InitializeComponent();
-            
+
             // ★ ウインドウタイトルにアプリ名とバージョンを自動反映
             this.Title = $"{AppTitle} v{AppVersion}";
 
@@ -316,7 +316,7 @@ namespace TwinCamCaptureFor3D
                 VideoCapture? capture = null;
                 try
                 {
-                    Thread.Sleep(200);
+                    Thread.Sleep(600);
                     capture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
 
                     if (!capture.IsOpened())
@@ -438,40 +438,60 @@ namespace TwinCamCaptureFor3D
             StopPreview();
         }
 
-        private void StopPreview()
+private void StopPreview()
+{
+    if (_isRecording) StopRecording();
+
+    // 1. まずUIスレッド側の更新をストップ
+    Dispatcher.Invoke(() =>
+    {
+        LeftCamImage.Source = null;
+        RightCamImage.Source = null;
+        
+        StopButton.IsEnabled = false;
+        RecordButton.IsEnabled = false;
+        CaptureButton.IsEnabled = false;
+        RecordButton.Content = "両方同時に録画開始";
+        LeftCameraComboBox.IsEnabled = true;
+        RightCameraComboBox.IsEnabled = true;
+
+        ValidateAndUpdateStartButtonState();
+        StreamInfoText.Text = "ステータス: プレビュー停止";
+    });
+
+    // 2. バックグラウンドの読み取りループにキャンセルを通知
+    _leftCts?.Cancel();
+    _rightCts?.Cancel();
+
+    // 3. 2台分のビデオキャプチャを完全に解放する（ここを丁寧に）
+    lock (_lockObject)
+    {
+        // 左右それぞれの解放を安全に行う
+        if (_leftCapture != null)
         {
-            if (_isRecording) StopRecording();
-
-            Dispatcher.Invoke(() =>
-            {
-                LeftCamImage.Source = null;
-                RightCamImage.Source = null;
-                
-                StopButton.IsEnabled = false;
-                RecordButton.IsEnabled = false;
-                CaptureButton.IsEnabled = false;
-                RecordButton.Content = "両方同時に録画開始";
-                LeftCameraComboBox.IsEnabled = true;
-                RightCameraComboBox.IsEnabled = true;
-
-                ValidateAndUpdateStartButtonState();
-                StreamInfoText.Text = "ステータス: プレビュー停止";
-            });
-
-            _leftCts?.Cancel();
-            _rightCts?.Cancel();
-
-            lock (_lockObject)
-            {
-                if (_leftCapture != null) { try { _leftCapture.Release(); } catch { } _leftCapture.Dispose(); _leftCapture = null; }
-                if (_rightCapture != null) { try { _rightCapture.Release(); } catch { } _rightCapture.Dispose(); _rightCapture = null; }
-                
-                _latestLeft?.Dispose(); _latestLeft = null;
-                _latestRight?.Dispose(); _latestRight = null;
-            }
-
-            Thread.Sleep(800);
+            try { _leftCapture.Release(); } catch { }
+            _leftCapture.Dispose();
+            _leftCapture = null;
         }
+
+        if (_rightCapture != null)
+        {
+            try { _rightCapture.Release(); } catch { }
+            _rightCapture.Dispose();
+            _rightCapture = null;
+        }
+        
+        _latestLeft?.Dispose(); 
+        _latestLeft = null;
+        _latestRight?.Dispose(); 
+        _latestRight = null;
+    }
+
+    // 4. ★ここがポイント：2台分のドライバが完全に解放されるのを「1秒〜1.5秒」しっかり待つ
+    // スレッドを止めるだけでなく、OSがポートの接続情報をクリアする猶予を与えます
+    Thread.Sleep(1200);
+}
+
 
         private void RecordButton_Click(object sender, RoutedEventArgs e)
         {
@@ -638,15 +658,18 @@ namespace TwinCamCaptureFor3D
             });
         }
 
-        private void Window_Closing(object sender, CancelEventArgs e)
-        {
-            StopPreview();
-            _leftCts?.Dispose();
-            _rightCts?.Dispose();
+private void Window_Closing(object sender, CancelEventArgs e)
+{
+    // 確実に停止処理を走らせる
+    StopPreview();
+    
+    _leftCts?.Dispose();
+    _rightCts?.Dispose();
 
-            System.GC.Collect();
-            System.GC.WaitForPendingFinalizers();
-        }
+    // 最後に念のためもう一息待つ
+    Thread.Sleep(300);
+}
+
     }
 
     public class CameraInfo

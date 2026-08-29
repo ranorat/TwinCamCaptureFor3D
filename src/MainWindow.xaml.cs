@@ -3,19 +3,19 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using OpenCvSharp;
 using OpenCvSharp.WpfExtensions;
-using System.Windows.Media.Imaging; // ← これを追加
+using System.Windows.Media.Imaging;
 
 namespace TwinCamCaptureFor3D
 {
     public partial class MainWindow : System.Windows.Window
     {
-        // ★ バージョン番号を一括管理する変数（ここを変更すれば全体に反映されます）
-        private const string AppVersion = "1.0.0";
+        private const string AppVersion = "1.0.2";
         private const string AppTitle = "TwinCamCaptureFor3D (3D立体視用デュアルカメラレコーダー)";
 
         private VideoCapture? _leftCapture;
@@ -39,7 +39,8 @@ namespace TwinCamCaptureFor3D
         {
             InitializeComponent();
 
-            // ★ ウインドウタイトルにアプリ名とバージョンを自動反映
+            Environment.SetEnvironmentVariable("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
+
             this.Title = $"{AppTitle} v{AppVersion}";
 
             InitializeFpsLists();
@@ -70,21 +71,45 @@ namespace TwinCamCaptureFor3D
             RightCameraComboBox.IsEnabled = false;
             StartButton.IsEnabled = false;
 
-            _allCameras = await Task.Run(() =>
+            _allCameras = await Task.Run(async () =>
             {
                 var list = new List<CameraInfo>();
-                for (int i = 0; i < 4; i++)
+                try
                 {
-                    try
+                    var videoDevices = await Windows.Devices.Enumeration.DeviceInformation.FindAllAsync(
+                        Windows.Devices.Enumeration.DeviceClass.VideoCapture);
+
+                    for (int i = 0; i < videoDevices.Count; i++)
                     {
-                        using var tempCapture = new VideoCapture(i, VideoCaptureAPIs.DSHOW);
-                        if (tempCapture.IsOpened())
-                        {
-                            list.Add(new CameraInfo { Index = i, Name = $"カメラデバイス {i}" });
-                        }
+                        var dev = videoDevices[i];
+                        string rawName = string.IsNullOrWhiteSpace(dev.Name) ? $"カメラデバイス {i}" : dev.Name;
+                        
+                        // ★修正：デバイス名の頭に論理番号（インデックス）を付番して区別しやすくする
+                        string formattedName = $"[{i}] {rawName}";
+
+                        list.Add(new CameraInfo 
+                        { 
+                            Index = i, 
+                            Name = formattedName,
+                            WinRtId = dev.Id 
+                        });
                     }
-                    catch { }
-                    Thread.Sleep(20);
+                }
+                catch 
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        try
+                        {
+                            using var tempCapture = new VideoCapture(i, VideoCaptureAPIs.DSHOW);
+                            if (tempCapture.IsOpened())
+                            {
+                                list.Add(new CameraInfo { Index = i, Name = $"[{i}] カメラデバイス {i}", WinRtId = string.Empty });
+                            }
+                        }
+                        catch { }
+                        Thread.Sleep(20);
+                    }
                 }
                 return list;
             });
@@ -112,6 +137,18 @@ namespace TwinCamCaptureFor3D
         private void RightCameraComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
         }
+
+
+        private void LeftResolutionComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            ValidateAndUpdateStartButtonState();
+        }
+
+        private void RightResolutionComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            ValidateAndUpdateStartButtonState();
+        }
+
 
         private void UpdateRightComboBox()
         {
@@ -165,6 +202,12 @@ namespace TwinCamCaptureFor3D
 
         private void BrowseFolder_Click(object sender, RoutedEventArgs e)
         {
+            if (_leftCapture != null || _rightCapture != null || _isRecording)
+            {
+                MessageBox.Show("プレビュー中または録画中は保存先を変更できません。一度プレビューを停止してください。", "確認", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             var dialog = new Microsoft.Win32.OpenFolderDialog
             {
                 Title = "保存先フォルダを選択",
@@ -190,71 +233,100 @@ namespace TwinCamCaptureFor3D
 
             StartButton.IsEnabled = false;
             CaptureButton.IsEnabled = false;
-            StreamInfoText.Text = "ステータス: 解像度を取得中...";
+            StreamInfoText.Text = "ステータス: WinRT APIで仕様を一括取得中...";
 
             if (leftIndex.HasValue)
             {
-                await LoadResolutionsAsync(leftIndex.Value, LeftResolutionComboBox);
+                var camInfo = _allCameras.Find(c => c.Index == leftIndex.Value);
+                if (camInfo != null)
+                {
+                    await LoadSpecificationsViaWinRtAsync(camInfo, LeftResolutionComboBox);
+                }
             }
 
             if (rightIndex.HasValue)
             {
-                await LoadResolutionsAsync(rightIndex.Value, RightResolutionComboBox);
+                var camInfo = _allCameras.Find(c => c.Index == rightIndex.Value);
+                if (camInfo != null)
+                {
+                    await LoadSpecificationsViaWinRtAsync(camInfo, RightResolutionComboBox);
+                }
             }
 
             ValidateAndUpdateStartButtonState();
+            StreamInfoText.Text = "ステータス: 仕様取得完了";
         }
 
-        private async Task LoadResolutionsAsync(int cameraIndex, System.Windows.Controls.ComboBox targetResolutionComboBox)
+        private async Task LoadSpecificationsViaWinRtAsync(CameraInfo camInfo, System.Windows.Controls.ComboBox targetResolutionComboBox)
         {
             targetResolutionComboBox.IsEnabled = false;
 
-            var resolutions = await Task.Run(() =>
+            var resolutions = await Task.Run(async () =>
             {
                 var list = new List<ResolutionInfo>();
-                var testResolutions = new[]
+
+                if (string.IsNullOrEmpty(camInfo.WinRtId))
                 {
-                    new { Width = 1920, Height = 1080 },
-                    new { Width = 1280, Height = 720  },
-                    new { Width = 960,  Height = 540  },
-                    new { Width = 640,  Height = 480  },
-                    new { Width = 640,  Height = 360  }
-                };
+                    list.Add(new ResolutionInfo { Width = 640, Height = 480, Fourcc = 0, CodecName = "DEFAULT", DisplayName = "640 x 480 (DEFAULT)" });
+                    return list;
+                }
 
                 try
                 {
-                    using var tempCapture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
-                    if (!tempCapture.IsOpened()) return list;
-
-                    foreach (var res in testResolutions)
+                    using var tempCapture = new Windows.Media.Capture.MediaCapture();
+                    var settings = new Windows.Media.Capture.MediaCaptureInitializationSettings
                     {
-                        try
+                        VideoDeviceId = camInfo.WinRtId,
+                        StreamingCaptureMode = Windows.Media.Capture.StreamingCaptureMode.Video
+                    };
+
+                    await tempCapture.InitializeAsync(settings);
+                    var vFormats = tempCapture.VideoDeviceController.GetAvailableMediaStreamProperties(
+                        Windows.Media.Capture.MediaStreamType.VideoRecord);
+
+                    foreach (var f in vFormats.OfType<Windows.Media.MediaProperties.VideoEncodingProperties>())
+                    {
+                        uint w = f.Width;
+                        uint h = f.Height;
+                        double fps = Math.Round((double)f.FrameRate.Numerator / f.FrameRate.Denominator, 2);
+
+                        string subtype = f.Subtype.ToUpper();
+                        string codecName = subtype.Length > 4 ? subtype.Substring(0, 4) : subtype;
+
+                        if (f.Subtype.Equals("3432564e-0000-0010-8000-00aa00389b71", StringComparison.OrdinalIgnoreCase)) codecName = "NV12";
+                        if (f.Subtype.Equals("32595559-0000-0010-8000-00aa00389b71", StringComparison.OrdinalIgnoreCase)) codecName = "YUY2";
+                        if (f.Subtype.Equals("47504a4d-0000-0010-8000-00aa00389b71", StringComparison.OrdinalIgnoreCase)) codecName = "MJPG";
+                        if (f.Subtype.Equals("34363268-0000-0010-8000-00aa00389b71", StringComparison.OrdinalIgnoreCase)) codecName = "H264";
+
+                        int fourcc = 0;
+                        if (codecName == "MJPG") fourcc = VideoWriter.FourCC('M', 'J', 'P', 'G');
+                        else if (codecName == "YUY2") fourcc = VideoWriter.FourCC('Y', 'U', 'Y', '2');
+                        else if (codecName == "NV12") fourcc = VideoWriter.FourCC('N', 'V', '1', '2');
+
+                        if (fourcc != 0)
                         {
-                            tempCapture.Set(VideoCaptureProperties.FrameWidth, res.Width);
-                            tempCapture.Set(VideoCaptureProperties.FrameHeight, res.Height);
-
-                            int actualWidth = (int)tempCapture.Get(VideoCaptureProperties.FrameWidth);
-                            int actualHeight = (int)tempCapture.Get(VideoCaptureProperties.FrameHeight);
-
-                            if (actualWidth > 0 && actualHeight > 0)
+                            string label = $"{codecName} | {w} x {h}";
+                            if (!list.Exists(r => r.Width == (int)w && r.Height == (int)h && r.Fourcc == fourcc))
                             {
-                                string label = $"{actualWidth} x {actualHeight}";
-                                if (!list.Exists(r => r.Width == actualWidth && r.Height == actualHeight))
-                                {
-                                    list.Add(new ResolutionInfo { Width = actualWidth, Height = actualHeight, DisplayName = label });
-                                }
+                                list.Add(new ResolutionInfo 
+                                { 
+                                    Width = (int)w, 
+                                    Height = (int)h, 
+                                    Fourcc = fourcc, 
+                                    CodecName = codecName, 
+                                    DisplayName = label 
+                                });
                             }
                         }
-                        catch { }
-                        Thread.Sleep(20);
                     }
                 }
                 catch { }
 
                 if (list.Count == 0)
                 {
-                    list.Add(new ResolutionInfo { Width = 640, Height = 480, DisplayName = "640 x 480" });
+                    list.Add(new ResolutionInfo { Width = 640, Height = 480, Fourcc = VideoWriter.FourCC('Y', 'U', 'Y', '2'), CodecName = "YUY2", DisplayName = "YUY2 | 640 x 480" });
                 }
+
                 return list;
             });
 
@@ -302,6 +374,8 @@ namespace TwinCamCaptureFor3D
             RightCameraComboBox.IsEnabled = false;
             LeftResolutionComboBox.IsEnabled = false;
             RightResolutionComboBox.IsEnabled = false;
+            
+            if (BrowseButton != null) BrowseButton.IsEnabled = false;
 
             Dispatcher.Invoke(() =>
             {
@@ -329,6 +403,10 @@ namespace TwinCamCaptureFor3D
 
                     capture.Set(VideoCaptureProperties.FrameWidth, selectedRes.Width);
                     capture.Set(VideoCaptureProperties.FrameHeight, selectedRes.Height);
+                    if (selectedRes.Fourcc != 0)
+                    {
+                        capture.Set(VideoCaptureProperties.FourCC, selectedRes.Fourcc);
+                    }
 
                     lock (_lockObject)
                     {
@@ -363,12 +441,11 @@ namespace TwinCamCaptureFor3D
 
                         if (readSuccess && !frame.Empty())
                         {
-                            // Bitmapの変換とFreeze処理
                             System.Windows.Media.Imaging.WriteableBitmap? bmp = null;
                             try
                             {
                                 bmp = WriteableBitmapConverter.ToWriteableBitmap(frame);
-                                bmp.Freeze(); // フリーズしてスレッド間の描画を軽量化
+                                bmp.Freeze();
                             }
                             catch { }
 
@@ -399,15 +476,11 @@ namespace TwinCamCaptureFor3D
                                 }
                             }
                         }
-
-
-
                         else
                         {
                             Thread.Sleep(10);
                         }
 
-                        // 録画処理部分はそのままでOK
                         lock (_lockObject)
                         {
                             var writer = isLeft ? _leftWriter : _rightWriter;
@@ -437,7 +510,6 @@ namespace TwinCamCaptureFor3D
                             }
                         }
                     }
-
                 }
                 catch (Exception ex)
                 {
@@ -455,60 +527,55 @@ namespace TwinCamCaptureFor3D
             StopPreview();
         }
 
-private void StopPreview()
-{
-    if (_isRecording) StopRecording();
-
-    // 1. まずUIスレッド側の更新をストップ
-    Dispatcher.Invoke(() =>
-    {
-        LeftCamImage.Source = null;
-        RightCamImage.Source = null;
-        
-        StopButton.IsEnabled = false;
-        RecordButton.IsEnabled = false;
-        CaptureButton.IsEnabled = false;
-        RecordButton.Content = "両方同時に録画開始";
-        LeftCameraComboBox.IsEnabled = true;
-        RightCameraComboBox.IsEnabled = true;
-
-        ValidateAndUpdateStartButtonState();
-        StreamInfoText.Text = "ステータス: プレビュー停止";
-    });
-
-    // 2. バックグラウンドの読み取りループにキャンセルを通知
-    _leftCts?.Cancel();
-    _rightCts?.Cancel();
-
-    // 3. 2台分のビデオキャプチャを完全に解放する（ここを丁寧に）
-    lock (_lockObject)
-    {
-        // 左右それぞれの解放を安全に行う
-        if (_leftCapture != null)
+        private void StopPreview()
         {
-            try { _leftCapture.Release(); } catch { }
-            _leftCapture.Dispose();
-            _leftCapture = null;
+            if (_isRecording) StopRecording();
+
+            Dispatcher.Invoke(() =>
+            {
+                LeftCamImage.Source = null;
+                RightCamImage.Source = null;
+                
+                StopButton.IsEnabled = false;
+                RecordButton.IsEnabled = false;
+                CaptureButton.IsEnabled = false;
+                RecordButton.Content = "両方同時に録画開始";
+                LeftCameraComboBox.IsEnabled = true;
+                RightCameraComboBox.IsEnabled = true;
+                
+                if (BrowseButton != null) BrowseButton.IsEnabled = true;
+
+                ValidateAndUpdateStartButtonState();
+                StreamInfoText.Text = "ステータス: プレビュー停止";
+            });
+
+            _leftCts?.Cancel();
+            _rightCts?.Cancel();
+
+            lock (_lockObject)
+            {
+                if (_leftCapture != null)
+                {
+                    try { _leftCapture.Release(); } catch { }
+                    _leftCapture.Dispose();
+                    _leftCapture = null;
+                }
+
+                if (_rightCapture != null)
+                {
+                    try { _rightCapture.Release(); } catch { }
+                    _rightCapture.Dispose();
+                    _rightCapture = null;
+                }
+                
+                _latestLeft?.Dispose(); 
+                _latestLeft = null;
+                _latestRight?.Dispose(); 
+                _latestRight = null;
+            }
+
+            Thread.Sleep(1200);
         }
-
-        if (_rightCapture != null)
-        {
-            try { _rightCapture.Release(); } catch { }
-            _rightCapture.Dispose();
-            _rightCapture = null;
-        }
-        
-        _latestLeft?.Dispose(); 
-        _latestLeft = null;
-        _latestRight?.Dispose(); 
-        _latestRight = null;
-    }
-
-    // 4. ★ここがポイント：2台分のドライバが完全に解放されるのを「1秒〜1.5秒」しっかり待つ
-    // スレッドを止めるだけでなく、OSがポートの接続情報をクリアする猶予を与えます
-    Thread.Sleep(1200);
-}
-
 
         private void RecordButton_Click(object sender, RoutedEventArgs e)
         {
@@ -530,7 +597,7 @@ private void StopPreview()
                         int h = _leftCapture != null ? (int)_leftCapture.Get(VideoCaptureProperties.FrameHeight) : leftRes.Height;
                         
                         string fpsStr = fps.ToString("0.##").Replace(".", "_");
-                        string fileName = $"{timestamp}_Cam{leftIdx}_{w}x{h}_{fpsStr}fps.mp4";
+                        string fileName = $"{timestamp}_Cam{leftIdx}_{leftRes.CodecName}_{w}x{h}_{fpsStr}fps.mp4";
                         string path = Path.Combine(saveDir, fileName);
 
                         _leftWriter = new VideoWriter(path, VideoWriter.FourCC(@"X264"), fps, new OpenCvSharp.Size(w, h));
@@ -543,7 +610,7 @@ private void StopPreview()
                         int h = _rightCapture != null ? (int)_rightCapture.Get(VideoCaptureProperties.FrameHeight) : rightRes.Height;
                         
                         string fpsStr = fps.ToString("0.##").Replace(".", "_");
-                        string fileName = $"{timestamp}_Cam{rightIdx}_{w}x{h}_{fpsStr}fps.mp4";
+                        string fileName = $"{timestamp}_Cam{rightIdx}_{rightRes.CodecName}_{w}x{h}_{fpsStr}fps.mp4";
                         string path = Path.Combine(saveDir, fileName);
 
                         _rightWriter = new VideoWriter(path, VideoWriter.FourCC(@"X264"), fps, new OpenCvSharp.Size(w, h));
@@ -577,20 +644,20 @@ private void StopPreview()
 
             lock (_lockObject)
             {
-                if (_latestLeft != null && !_latestLeft.Empty() && LeftCameraComboBox.SelectedValue is int leftIdx)
+                if (_latestLeft != null && !_latestLeft.Empty() && LeftCameraComboBox.SelectedValue is int leftIdx && LeftResolutionComboBox.SelectedItem is ResolutionInfo leftRes)
                 {
                     int w = (int)_latestLeft.Width;
                     int h = (int)_latestLeft.Height;
-                    string fileName = $"{timestamp}_Cam{leftIdx}_{w}x{h}.png";
+                    string fileName = $"{timestamp}_Cam{leftIdx}_{leftRes.CodecName}_{w}x{h}.png";
                     string path = Path.Combine(saveDir, fileName);
                     Cv2.ImWrite(path, _latestLeft);
                 }
 
-                if (_latestRight != null && !_latestRight.Empty() && RightCameraComboBox.SelectedValue is int rightIdx)
+                if (_latestRight != null && !_latestRight.Empty() && RightCameraComboBox.SelectedValue is int rightIdx && RightResolutionComboBox.SelectedItem is ResolutionInfo rightRes)
                 {
                     int w = (int)_latestRight.Width;
                     int h = (int)_latestRight.Height;
-                    string fileName = $"{timestamp}_Cam{rightIdx}_{w}x{h}.png";
+                    string fileName = $"{timestamp}_Cam{rightIdx}_{rightRes.CodecName}_{w}x{h}.png";
                     string path = Path.Combine(saveDir, fileName);
                     Cv2.ImWrite(path, _latestRight);
                 }
@@ -609,7 +676,6 @@ private void StopPreview()
             }
         }
 
-        // ★ ライセンス情報を表示するメニュー（またはボタン）用のイベントハンドラ
         private void AboutButton_Click(object sender, RoutedEventArgs e)
         {
             string authorName = "ranorat";
@@ -675,30 +741,30 @@ private void StopPreview()
             });
         }
 
-private void Window_Closing(object sender, CancelEventArgs e)
-{
-    // 確実に停止処理を走らせる
-    StopPreview();
-    
-    _leftCts?.Dispose();
-    _rightCts?.Dispose();
+        private void Window_Closing(object sender, CancelEventArgs e)
+        {
+            StopPreview();
+            
+            _leftCts?.Dispose();
+            _rightCts?.Dispose();
 
-    // 最後に念のためもう一息待つ
-    Thread.Sleep(300);
-}
-
+            Thread.Sleep(300);
+        }
     }
 
     public class CameraInfo
     {
         public int Index { get; set; }
         public string Name { get; set; } = string.Empty;
+        public string WinRtId { get; set; } = string.Empty;
     }
 
     public class ResolutionInfo
     {
         public int Width { get; set; }
         public int Height { get; set; }
+        public int Fourcc { get; set; }
+        public string CodecName { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
     }
 }

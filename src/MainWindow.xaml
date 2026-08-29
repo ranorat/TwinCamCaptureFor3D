@@ -17,8 +17,7 @@
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
             <TextBlock Text="共通保存先: " VerticalAlignment="Center" Width="80" FontWeight="Bold"/>
             <TextBox x:Name="SavePathTextBox" Width="300" VerticalAlignment="Center" Margin="0,0,5,0" Height="24"/>
-            <Button Content="参照..." Width="60" Padding="5,2" Margin="0,0,15,0" Click="BrowseFolder_Click"/>
-            
+            <Button x:Name="BrowseButton" Content="参照..." Width="60" Padding="5,2" Margin="0,0,15,0" Click="BrowseFolder_Click"/>
             <Button Content="全デバイス更新" Width="100" Margin="0,0,10,0" Padding="5,2" Click="RefreshCameras_Click"/>
             <Button Content="解像度を取得" Width="100" Padding="5,2" Click="FetchResolutions_Click" FontWeight="Bold" Foreground="DarkGreen"/>
             <Button Content="バージョン情報" Click="AboutButton_Click" Width="90" Height="25" Margin="5" />
@@ -51,7 +50,13 @@
 
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,5">
                         <TextBlock Text="解像度 / FPS:" Width="75" VerticalAlignment="Center"/>
-                        <ComboBox x:Name="LeftResolutionComboBox" Width="100" Margin="0,0,5,0"/>
+<!-- 左カメラ用解像度 -->
+<ComboBox x:Name="LeftResolutionComboBox" 
+          Style="{StaticResource WideComboBoxStyle}" 
+          Height="26" 
+          VerticalAlignment="Center" 
+          Margin="0,0,10,0" 
+          SelectionChanged="LeftResolutionComboBox_SelectionChanged"/>
                         <ComboBox x:Name="LeftFpsComboBox" Width="95"/>
                     </StackPanel>
 
@@ -82,7 +87,12 @@
 
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,5">
                         <TextBlock Text="解像度 / FPS:" Width="75" VerticalAlignment="Center"/>
-                        <ComboBox x:Name="RightResolutionComboBox" Width="100" Margin="0,0,5,0"/>
+<!-- 右カメラ用解像度 -->
+<ComboBox x:Name="RightResolutionComboBox" 
+          Style="{StaticResource WideComboBoxStyle}" 
+          Height="26" 
+          VerticalAlignment="Center" 
+          Margin="0,0,10,0"/> 
                         <ComboBox x:Name="RightFpsComboBox" Width="95"/>
                     </StackPanel>
 

@@ -4,6 +4,11 @@
              xmlns:local="clr-namespace:WebCamApp"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
+
+        <!-- ★追加：プルダウンを開いたときに項目の文字が途切れないようにするスタイル -->
+        <Style x:Key="WideComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="MinWidth" Value="240"/>
+        </Style>
          
     </Application.Resources>
 </Application>

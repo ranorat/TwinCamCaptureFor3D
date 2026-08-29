@@ -18,4 +18,8 @@ dotnet add package OpenCvSharp4.WpfExtensions
 ●免責事項  
 ・作成者または著作権保持者は、本ソフトウエアの利用によって生じた損害の一切の責任を負わないものとします。  
 ・フリーソフトとして公開するため、MIT License　を適用します。  
+
+【使用ライブラリおよびライセンス情報】  
+[1]OpenCvSharp (OpenCV wrapper for .NET) License: Apache License 2.0 Copyright (c) shimat  
+[2]OpenCV (Open Source Computer Vision Library) License: Apache License 2.0  
 .
